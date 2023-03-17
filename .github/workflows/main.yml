@@ -39,5 +39,4 @@ jobs:
         with:
           name: Vulnerability Report
           path: output.txt
-          name: Secret Keys Report
-          path: secrets.txt
+         
