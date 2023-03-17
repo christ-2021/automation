@@ -18,7 +18,7 @@ jobs:
           subfinder -d example.com -o subdomains.txt
       - name: Install httpx
         run: |
-          sudo apt update && sudo snap install -y httpx
+          sudo apt update && sudo snap install httpx
       - name: Find live URLs
         run: |
           cat subdomains.txt | httpx -silent | sort -u > urls.txt
