@@ -1,0 +1,43 @@
+name: Subdomain enumeration and vulnerability scanning
+
+on: [push]
+
+jobs:
+  subdomain_scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+      - name: Install subfinder
+        run: |
+          wget https://github.com/projectdiscovery/subfinder/releases/download/v2.4.5/subfinder_2.4.5_linux_amd64.tar.gz
+          tar -xzvf subfinder_2.4.5_linux_amd64.tar.gz
+          sudo mv subfinder /usr/local/bin/
+      - name: Find subdomains
+        run: |
+          subfinder -d example.com -o subdomains.txt
+      - name: Install httpx
+        run: |
+          sudo apt update && sudo apt install -y httpx
+      - name: Find live URLs
+        run: |
+          cat subdomains.txt | httpx -silent | sort -u > urls.txt
+      - name: Install nuclei
+        run: |
+          wget https://github.com/projectdiscovery/nuclei/releases/download/v2.6.0/nuclei_2.6.0_linux_amd64.tar.gz
+          tar -xzvf nuclei_2.6.0_linux_amd64.tar.gz
+          sudo mv nuclei /usr/local/bin/
+      - name: Find vulnerabilities
+        run: |
+          nuclei -update-templates
+          cat urls.txt | nuclei -t /root/nuclei-templates/ -o output.txt
+      - name: Find secrets keys
+        run: |
+          cat urls.txt | grep '\.js$' | xargs -I@ sh -c 'curl -s @ | grep -Eo "(apiKey|secretKey|accessToken|password)[^\'\"\\s]+' | sort -u > secrets.txt'
+      - name: Generate report
+        uses: actions/upload-artifact@v2
+        with:
+          name: Vulnerability Report
+          path: output.txt
+          name: Secret Keys Report
+          path: secrets.txt
