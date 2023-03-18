@@ -21,7 +21,7 @@ jobs:
         run: go install github.com/tomnomnom/httprobe@latest
       
       - name: Install nuclei
-        run: GO111MODULE=on go get -v github.com/projectdiscovery/nuclei/v2/cmd/nuclei
+        run: GO111MODULE=on go install -v github.com/projectdiscovery/nuclei/v2/cmd/nuclei@latest
         
       - name: Install subfinder
         run: |
