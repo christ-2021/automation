@@ -27,11 +27,10 @@ jobs:
        #   brute: true
        #   output: hosts.txt
           
-      - name: Naabu - Port Scannner
-        uses: projectdiscovery/naabu-action@v1.0.1
+      - name: httpx Action
+        uses: projectdiscovery/httpx-action@v1.0.0
         with:
           list: hosts.txt
-          ports: 80,443
           output: urls.txt
             
       - name: Nuclei - DAST Scan
