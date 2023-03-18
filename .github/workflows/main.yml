@@ -1,56 +1,44 @@
-name: Subdomain Recon Workflow
-
 on:
   push:
     branches:
-      - main
+       - main
+    # schedule:
+    #    - cron: '0 0 * * 0'
+   # workflow_dispatch:
 
 jobs:
-  subdomain-recon:
+  recon:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v2
-      
-      - name: Set up Go
-        uses: actions/setup-go@v2
+      - uses: actions/checkout@v2
+      - uses: actions/setup-go@v2
         with:
-          go-version: '1.17'
-      
-      - name: Install httprobe
-        run: go install github.com/tomnomnom/httprobe@latest
-      
-      - name: Install nuclei
-        run:
-          git clone https://github.com/projectdiscovery/nuclei.git;
-          cd nuclei/v2/cmd/nuclei;
-          go build;
-          mv nuclei /usr/local/bin;
-          cd ../;
-        
+          go-version: 1.17
 
-      - name: Install subfinder
-        run: |
-          wget https://github.com/projectdiscovery/subfinder/releases/download/v2.4.5/subfinder_2.4.5_linux_amd64.tar.gz
-          tar -xzvf subfinder_2.4.5_linux_amd64.tar.gz
-          sudo mv subfinder /usr/local/bin/
-          
-      - name: Find subdomains
-        run: subfinder -d example.com -o subdomains.txt
-      
-      - name: Find live URLs
-        run: cat subdomains.txt | httprobe | tee urls.txt
-      
-      - name: Run nuclei on live URLs
-        run: cat urls.txt | nuclei -t ~/nuclei-templates/ -o report.txt
-      
-      - name: Create GitHub issue
-        uses: peter-evans/create-issue-from-file@v2
+      - name: Amass - Enumeration
+        uses: fguisso/amass-action@main
         with:
-          title: Nuclei Report for example.com
-          body: |
-            Please find the Nuclei report for example.com in the attachment.
-          labels: report
-          assignees: ${{ github.actor }}
-          milestone: '1'
-          file-path: report.txt
+          domains: owasp.org
+          brute: true
+          output: hosts.txt
+          
+      - name: Naabu - Port Scannner
+        uses: projectdiscovery/naabu-action@main
+        with:
+            list: hosts.txt
+            output: urls.txt
+            
+      - name: Nuclei - DAST Scan
+        uses: projectdiscovery/nuclei-action@main
+        with:
+          urls: urls.txt
+          output: nuclei.txt
+
+      - name: GitHub Workflow artifacts
+        uses: actions/upload-artifact@v2
+        with:
+          name: hosts.txt
+          path: |
+            hosts.txt
+            urls.txt
+            nuclei.txt
