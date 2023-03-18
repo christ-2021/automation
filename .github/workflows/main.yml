@@ -1,42 +1,47 @@
-name: Subdomain enumeration and vulnerability scanning
+name: Subdomain Recon Workflow
 
-on: [push]
+on:
+  push:
+    branches:
+      - main
 
 jobs:
-  subdomain_scan:
+  subdomain-recon:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v2
-      - name: Install subfinder
-        run: |
-          wget https://github.com/projectdiscovery/subfinder/releases/download/v2.4.5/subfinder_2.4.5_linux_amd64.tar.gz
-          tar -xzvf subfinder_2.4.5_linux_amd64.tar.gz
-          sudo mv subfinder /usr/local/bin/
-      - name: Find subdomains
-        run: |
-          subfinder -d example.com -o subdomains.txt
-      - name: Install httpx
-        run: |
-          sudo apt update && sudo snap install httpx
-      - name: Find live URLs
-        run: |
-          cat subdomains.txt | httpx -silent | sort -u > urls.txt
-      - name: Install nuclei
-        run: |
-          wget https://github.com/projectdiscovery/nuclei/releases/download/v2.6.0/nuclei_2.6.0_linux_amd64.tar.gz
-          tar -xzvf nuclei_2.6.0_linux_amd64.tar.gz
-          sudo mv nuclei /usr/local/bin/
-      - name: Find vulnerabilities
-        run: |
-          nuclei -update-templates
-          cat urls.txt | nuclei -t /root/nuclei-templates/ -o output.txt
-      - name: Find secrets keys
-        run: |
-          cat urls.txt | grep '\.js$' | xargs -I@ sh -c 'curl -s @ | grep -Eo "(apiKey|secretKey|accessToken|password)[^\'\"\\s]+' | sort -u > secrets.txt'
-      - name: Generate report
-        uses: actions/upload-artifact@v2
+      
+      - name: Set up Go
+        uses: actions/setup-go@v2
         with:
-          name: Vulnerability Report
-          path: output.txt
-         
+          go-version: '1.17'
+          
+      - name: Install subfinder
+        run: go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
+      
+      - name: Install httprobe
+        run: go install github.com/tomnomnom/httprobe@latest
+      
+      - name: Install nuclei
+        run: GO111MODULE=on go get -v github.com/projectdiscovery/nuclei/v2/cmd/nuclei
+      
+      - name: Find subdomains
+        run: subfinder -d example.com -o subdomains.txt
+      
+      - name: Find live URLs
+        run: cat subdomains.txt | httprobe | tee urls.txt
+      
+      - name: Run nuclei on live URLs
+        run: cat urls.txt | nuclei -t ~/nuclei-templates/ -o report.txt
+      
+      - name: Create GitHub issue
+        uses: peter-evans/create-issue-from-file@v2
+        with:
+          title: Nuclei Report for example.com
+          body: |
+            Please find the Nuclei report for example.com in the attachment.
+          labels: report
+          assignees: ${{ github.actor }}
+          milestone: '1'
+          file-path: report.txt
