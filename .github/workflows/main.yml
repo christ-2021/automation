@@ -21,8 +21,13 @@ jobs:
         run: go install github.com/tomnomnom/httprobe@latest
       
       - name: Install nuclei
-        run: GO111MODULE=on go install -v github.com/projectdiscovery/nuclei/v2/cmd/nuclei@latest
+        run:
+          git clone https://github.com/projectdiscovery/nuclei.git
+          cd nuclei/v2/cmd/nuclei
+          go build
+          mv nuclei /usr/local/bin
         
+
       - name: Install subfinder
         run: |
           wget https://github.com/projectdiscovery/subfinder/releases/download/v2.4.5/subfinder_2.4.5_linux_amd64.tar.gz
