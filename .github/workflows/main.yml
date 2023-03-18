@@ -25,8 +25,7 @@ jobs:
       - name: Naabu - Port Scannner
         uses: projectdiscovery/naabu-action@main
         with:
-            list: hosts.txt
-            output: urls.txt
+          host: example.com
             
       - name: Nuclei - DAST Scan
         uses: projectdiscovery/nuclei-action@main
