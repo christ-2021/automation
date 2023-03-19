@@ -18,7 +18,7 @@ jobs:
       - name: 🔎 SubFinder - DNS Enumeration
         uses: projectdiscovery/subfinder-action@v1.0.0
         with:
-          domain: nmap.org
+          domain: updowntrade.store
           output: hosts.txt
       #- name: Amass - Enumeration
        # uses: fguisso/amass-action@main
