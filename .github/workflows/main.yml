@@ -1,49 +1,460 @@
+name: Auto Hunt by @fitsec77
 on:
   push:
-    branches:
-       - main
-    # schedule:
-    #    - cron: '0 0 * * 0'
-   # workflow_dispatch:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  DOMAIN: 'telecelfaso.bf'
 
 jobs:
-  recon:
+  subdomains:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
-      - uses: actions/setup-go@v2
-        with:
-          go-version: 1.17
+    - name: Checkout code
+      uses: actions/checkout@v2
+    - name: Install Go
+      uses: actions/setup-go@v2
+      with:
+        go-version: 1.19 
+    
+    - name: Install Required Tools 
+      run: |
+        go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
+        sudo apt-get install jq -y 
+      shell: bash
 
-      - name: 🔎 SubFinder - DNS Enumeration
-        uses: projectdiscovery/subfinder-action@v1.0.0
-        with:
-          domain: vinoticket.com
-          output: hosts.txt
-      #- name: Amass - Enumeration
-       # uses: fguisso/amass-action@main
-       # with:
-       #   domains: owasp.org
-       #   brute: true
-       #   output: hosts.txt
-          
-      - name: httpx Action
-        uses: projectdiscovery/httpx-action@v1.0.0
-        with:
-          list: hosts.txt
-          output: urls.txt
-            
-      - name: Nuclei - DAST Scan
-        uses: projectdiscovery/nuclei-action@main
-        with:
-          urls: urls.txt
-          output: nuclei.txt
+    - name: Run Subfinder
+      run: |
+        subfinder -d $DOMAIN -o subfinder_output.txt
+      shell: bash
+    - name: Run crt.sh
+      run: |
+        curl -s "https://crt.sh/?q=%25.$DOMAIN&output=json" | jq -r '.[].name_value' | sed 's/\*\.//g' | sort -u | tee -a crt.txt      
+      shell: bash
+    
+    - name: Sort Sub-domains
+      run: |
+        cat subfinder_output.txt crt.txt | grep -v www | uniq -u | tee -a sorted_domains.txt
+      shell: bash
+   
+    - name: Save results
+      uses: actions/upload-artifact@v2
+      with:
+        name: Subdomains results
+        path: |
+          subfinder_output.txt
+          crt.txt
+          sorted_domains.txt
+  HTTPX:
+    runs-on: ubuntu-latest
+    needs: subdomains
+    steps:
+    - name: Download results
+      uses: actions/download-artifact@v2
+      with:
+        name: Subdomains results
+    - name: Install Go
+      uses: actions/setup-go@v2
+      with:
+        go-version: 1.19 
 
-      - name: GitHub Workflow artifacts
-        uses: actions/upload-artifact@v2
-        with:
-          name: hosts.txt
-          path: |
-            hosts.txt
-            urls.txt
-            nuclei.txt
+    - name: Install Required Tools 
+      run: |
+        go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest 
+      shell: bash
+
+    - name: HTTPX_Detailed 
+      run: |
+        cat sorted_domains.txt | httpx -sc -title -server | tee -a detailed_httpx.txt
+      shell: bash
+    - name: HTTPX_Live for endpoint
+      run: | 
+        cat sorted_domains.txt | httpx -mc 200 | tee -a 200httpx.txt
+      shell: bash
+    - name: httpx for all - no filtering
+      run: |
+        cat sorted_domains.txt | httpx | tee -a normalhttpx.txt
+      shell: bash 
+
+    - name: Save results
+      uses: actions/upload-artifact@v2
+      with:
+        name: HTTPX results
+        path: |
+          detailed_httpx.txt
+          200httpx.txt
+          normalhttpx.txt
+
+  EndPonts-Waybackurls:
+    runs-on: ubuntu-latest
+    needs: HTTPX
+    steps:
+    - name: Download results
+      uses: actions/download-artifact@v2
+      with:
+        name: HTTPX results
+    - name: Install Go
+      uses: actions/setup-go@v2
+      with:
+        go-version: 1.19 
+
+    - name: Install Required Tools 
+      run: |
+        go install github.com/tomnomnom/waybackurls@latest
+      shell: bash
+
+    - name: Gathering Endpoints 
+      run: |
+        cat 200httpx.txt | waybackurls > waybackurls.txt
+      shell: bash
+
+    - name: Split the endpoint in 10 equal chunks
+      run: |
+        split -l $(( $(wc -l < waybackurls.txt) / 10 + 1)) waybackurls.txt split_ -a 1 -d --additional-suffix=.txt
+      shell: bash
+
+    - name: Save results
+      uses: actions/upload-artifact@v2
+      with:
+        name: endpoints results
+        path: |
+          waybackurls.txt
+          split_0.txt
+          split_1.txt
+          split_2.txt
+          split_3.txt
+          split_4.txt
+          split_5.txt
+          split_6.txt
+          split_7.txt
+          split_8.txt
+          split_9.txt
+
+  Nuclei-1:
+    runs-on: ubuntu-latest
+    needs: EndPonts-Waybackurls
+    steps:
+    - name: Download results
+      uses: actions/download-artifact@v2
+      with:
+        name: endpoints results
+    - name: Install Go
+      uses: actions/setup-go@v2
+      with:
+        go-version: 1.19 
+
+    - name: Install Required Tools 
+      run: |
+        go install -v github.com/projectdiscovery/nuclei/v2/cmd/nuclei@latest
+      shell: bash
+
+    - name: Vulnarability Scanning  
+      run: |
+        timeout 40h sh -c 'nuclei -l split_0.txt -es info  | tee nuclei_output1.txt; kill -TERM $$'
+      shell: bash
+
+    - name: Save results
+      uses: actions/upload-artifact@v2
+      with:
+        name: nuclei_output results
+        path: |
+          nuclei_output1.txt
+
+  Nuclei-2:
+    runs-on: ubuntu-latest
+    needs: EndPonts-Waybackurls
+    steps:
+    - name: Download results
+      uses: actions/download-artifact@v2
+      with:
+        name: endpoints results
+    - name: Install Go
+      uses: actions/setup-go@v2
+      with:
+        go-version: 1.19 
+
+    - name: Install Required Tools 
+      run: |
+        go install -v github.com/projectdiscovery/nuclei/v2/cmd/nuclei@latest
+      shell: bash
+
+    - name: Vulnarability Scanning  
+      run: |
+        timeout 40h sh -c 'nuclei -l split_1.txt -es info  | tee nuclei_output2.txt; kill -TERM $$'
+      shell: bash
+
+    - name: Save results
+      uses: actions/upload-artifact@v2
+      with:
+        name: nuclei_output results
+        path: |
+          nuclei_output2.txt
+
+  Nuclei-3:
+    runs-on: ubuntu-latest
+    needs: EndPonts-Waybackurls
+    steps:
+    - name: Download results
+      uses: actions/download-artifact@v2
+      with:
+        name: endpoints results
+    - name: Install Go
+      uses: actions/setup-go@v2
+      with:
+        go-version: 1.19 
+
+    - name: Install Required Tools 
+      run: |
+        go install -v github.com/projectdiscovery/nuclei/v2/cmd/nuclei@latest
+      shell: bash
+
+    - name: Vulnarability Scanning  
+      run: |
+        timeout 40h sh -c 'nuclei -l split_2.txt -es info  | tee nuclei_output3.txt; kill -TERM $$'
+      shell: bash
+
+    - name: Save results
+      uses: actions/upload-artifact@v2
+      with:
+        name: nuclei_output results
+        path: |
+          nuclei_output3.txt
+
+  Nuclei-4:
+    runs-on: ubuntu-latest
+    needs: EndPonts-Waybackurls
+    steps:
+    - name: Download results
+      uses: actions/download-artifact@v2
+      with:
+        name: endpoints results
+    - name: Install Go
+      uses: actions/setup-go@v2
+      with:
+        go-version: 1.19 
+
+    - name: Install Required Tools 
+      run: |
+        go install -v github.com/projectdiscovery/nuclei/v2/cmd/nuclei@latest
+      shell: bash
+
+    - name: Vulnarability Scanning  
+      run: |
+        timeout 40h sh -c 'nuclei -l split_3.txt -es info  | tee nuclei_output4.txt; kill -TERM $$'
+      shell: bash
+
+    - name: Save results
+      uses: actions/upload-artifact@v2
+      with:
+        name: nuclei_output results
+        path: |
+          nuclei_output4.txt
+  Nuclei-5:
+    runs-on: ubuntu-latest
+    needs: EndPonts-Waybackurls
+    steps:
+    - name: Download results
+      uses: actions/download-artifact@v2
+      with:
+        name: endpoints results
+    - name: Install Go
+      uses: actions/setup-go@v2
+      with:
+        go-version: 1.19 
+
+    - name: Install Required Tools 
+      run: |
+        go install -v github.com/projectdiscovery/nuclei/v2/cmd/nuclei@latest
+      shell: bash
+
+    - name: Vulnarability Scanning  
+      run: |
+        timeout 40h sh -c 'nuclei -l split_4.txt -es info  | tee nuclei_output5.txt; kill -TERM $$'
+      shell: bash
+
+    - name: Save results
+      uses: actions/upload-artifact@v2
+      with:
+        name: nuclei_output results
+        path: |
+          nuclei_output5.txt
+  Nuclei-6:
+    runs-on: ubuntu-latest
+    needs: EndPonts-Waybackurls
+    steps:
+    - name: Download results
+      uses: actions/download-artifact@v2
+      with:
+        name: endpoints results
+    - name: Install Go
+      uses: actions/setup-go@v2
+      with:
+        go-version: 1.19 
+
+    - name: Install Required Tools 
+      run: |
+        go install -v github.com/projectdiscovery/nuclei/v2/cmd/nuclei@latest
+      shell: bash
+
+    - name: Vulnarability Scanning  
+      run: |
+        timeout 40h sh -c 'nuclei -l split_5.txt -es info  | tee nuclei_output6.txt; kill -TERM $$'
+      shell: bash
+
+    - name: Save results
+      uses: actions/upload-artifact@v2
+      with:
+        name: nuclei_output results
+        path: |
+          nuclei_output6.txt
+  Nuclei-7:
+    runs-on: ubuntu-latest
+    needs: EndPonts-Waybackurls
+    steps:
+    - name: Download results
+      uses: actions/download-artifact@v2
+      with:
+        name: endpoints results
+    - name: Install Go
+      uses: actions/setup-go@v2
+      with:
+        go-version: 1.19 
+
+    - name: Install Required Tools 
+      run: |
+        go install -v github.com/projectdiscovery/nuclei/v2/cmd/nuclei@latest
+      shell: bash
+
+    - name: Vulnarability Scanning  
+      run: |
+        timeout 40h sh -c 'nuclei -l split_6.txt -es info  | tee nuclei_output7.txt; kill -TERM $$'
+      shell: bash
+
+    - name: Save results
+      uses: actions/upload-artifact@v2
+      with:
+        name: nuclei_output results
+        path: |
+          nuclei_output7.txt
+  Nuclei-8:
+    runs-on: ubuntu-latest
+    needs: EndPonts-Waybackurls
+    steps:
+    - name: Download results
+      uses: actions/download-artifact@v2
+      with:
+        name: endpoints results
+    - name: Install Go
+      uses: actions/setup-go@v2
+      with:
+        go-version: 1.19 
+
+    - name: Install Required Tools 
+      run: |
+        go install -v github.com/projectdiscovery/nuclei/v2/cmd/nuclei@latest
+      shell: bash
+
+    - name: Vulnarability Scanning  
+      run: |
+        timeout 40h sh -c 'nuclei -l split_7.txt -es info  | tee nuclei_output8.txt; kill -TERM $$'
+      shell: bash
+
+    - name: Save results
+      uses: actions/upload-artifact@v2
+      with:
+        name: nuclei_output results
+        path: |
+          nuclei_output8.txt
+  
+  Nuclei-9:
+    runs-on: ubuntu-latest
+    needs: EndPonts-Waybackurls
+    steps:
+    - name: Download results
+      uses: actions/download-artifact@v2
+      with:
+        name: endpoints results
+    - name: Install Go
+      uses: actions/setup-go@v2
+      with:
+        go-version: 1.19 
+
+    - name: Install Required Tools 
+      run: |
+        go install -v github.com/projectdiscovery/nuclei/v2/cmd/nuclei@latest
+      shell: bash
+
+    - name: Vulnarability Scanning  
+      run: |
+        timeout 40h sh -c 'nuclei -l split_8.txt -es info  | tee nuclei_output9.txt; kill -TERM $$'
+      shell: bash
+
+    - name: Save results
+      uses: actions/upload-artifact@v2
+      with:
+        name: nuclei_output results
+        path: |
+          nuclei_output9.txt
+
+  Nuclei-10:
+    runs-on: ubuntu-latest
+    needs: EndPonts-Waybackurls
+    steps:
+    - name: Download results
+      uses: actions/download-artifact@v2
+      with:
+        name: endpoints results
+    - name: Install Go
+      uses: actions/setup-go@v2
+      with:
+        go-version: 1.19 
+
+    - name: Install Required Tools 
+      run: |
+        go install -v github.com/projectdiscovery/nuclei/v2/cmd/nuclei@latest
+      shell: bash
+
+    - name: Vulnarability Scanning  
+      run: |
+        timeout 40h sh -c 'nuclei -l split_9.txt -es info  | tee nuclei_output10.txt; kill -TERM $$'
+      shell: bash
+
+    - name: Save results
+      uses: actions/upload-artifact@v2
+      with:
+        name: nuclei_output results
+        path: |
+          nuclei_output10.txt
+
+  Secret-Finder:
+    runs-on: ubuntu-latest
+    needs: EndPonts-Waybackurls
+    steps:
+    - name: Download results
+      uses: actions/download-artifact@v2
+      with:
+        name: endpoints results
+
+    - name: Install Required Tools 
+      run: |
+        sudo apt-get -y install python3 python3-pip
+        sudo pip3 install requests argparse dnspython
+        git clone https://github.com/m4ll0k/SecretFinder ~/SecretFinder
+        pip3 install -r ~/SecretFinder/requirements.txt
+      shell: bash
+
+    - name: Secret Finder by analyzing js file   
+      run: |
+        grep -iE '\.js$' waybackurls.txt > endpoints_with_js.txt
+        cat endpoints_with_js.txt | while read js ; do python3 ~/SecretFinder/SecretFinder.py -i $js -o cli | tee -a secretfinder.txt;done
+      shell: bash
+
+    - name: Save results
+      uses: actions/upload-artifact@v2
+      with:
+        name: secret-finder results
+        path: |
+          secretfinder.txt
+        
